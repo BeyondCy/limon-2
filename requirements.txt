@@ -1,0 +1,3 @@
+pyacoustid
+eyed3
+pillow
