@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# <limon.py> is a simple script for batch-updating MP3 files using
+# <limon.py> is a Python script for batch-updating MP3 files using
 # information gathered from the Internet.
 
 # All credits go to Pillow, AcoustID, eyeD3, and the Python Software
@@ -28,182 +28,220 @@ LASTFM_URL = 'http://ws.audioscrobbler.com/2.0/?method='
 LASTFM_API_KEY = "bf58f74243bf1ebedd90642338a7023f"
 AID_API_KEY = 'XN07NN3TxX'
 
+# global getopt settings
+recurse_flag = True
+dirmode = True
+
 # print limon usage
 def usage():
-	print("usage: limon.py [-F] -d/f <directory>/<file>")
-	print()
-	print("-F: Full cleaning of previous tags prior to tagging")
-	print("-R: Automagically repair selected MP3 files with a given title and artist")
+	print("Usage: limon.py -d <directory/file>")
 	print()
 	sys.exit(2)
 
-# loading dots
-def loading(status=0):
-	if status == 1:
-		print("X")
-	elif status == 2:
-		print("OK")
-	else:
-		print(".", end="")
+def dirformat(directory):
+	if directory.endswith('/') == False:
+		directory = directory + '/'
 
-# manual recovery
-def recover(sarray):
+	return directory
+
+# URL safe strings
+def gurl(string):
+	return urllib.parse.quote_plus(string)
+
+# generate filename
+def fngen(item):
+	lastslash = item.rfind('/')
+	filename = item[(lastslash + 1):len(item)]
+
+	return filename
+
+def search(url):
+	response = urlopen(url)
+	responsestring = response.read().decode('utf-8')
+	jsonobj = json.loads(responsestring)
+
+	return jsonobj
+
+# fancy menu for errors
+def menu(optarray):
+	for opt in optarray:
+		print("[%i]: %s" % ((optarray.index(opt) + 1), opt))
+
 	print()
-	print("Error in processsing: %s" % sarray)
-	if ("album" in sarray) and ("album_artist" in sarray):
-		print("Select track entry from search list, manually enter Artist and Album Artist, or continue? (S/M/n):", end=" ")
-		option = input()
+	try:
+		choice = int(input("[?]: "))
+	except:
+		print("ERROR: Choice must be of type 'int'")
+		print()
+		return menu(optarray)
 
-		# parse vars from array
-		title = sarray[2]
+	if (choice > (optarray.index(opt)) + 1) or (choice < 1):
+		print("ERROR: Choice out of range")
+		print()
+		return menu(optarray)
 
-		# search
-		if option == "S":
-			# check title in case error was on AcoustID
-			print("Is this track title correct: %s (y/N): " % title, end="")
-			toption = input()
-			if toption == "N":
-				title = input("Enter new track title: ")
+	return choice
 
-			# URL safe strings
-			urltitle = urllib.parse.quote_plus(title)
-			urlalbum_artist = urllib.parse.quote_plus(album)
+def tracksearch(title, artist):
+	trackopt = input("Track title is \"%s\", correct? (y/N): " % title)
 
-			page = 1
-			quit = False
-			while quit == False:
-				# URL generated for page
-				surl = LASTFM_URL + "track.search&track=%s&artist=%s&page=%i&limit=1&api_key=%s&format=json" % (urltitle, urlalbum_artist, page, LASTFM_API_KEY)
+	if trackopt == "N":
+		title = input("Enter new track title: ")
 
+	page = 0
+	select = False
+	while select == False:
+		aurl = LASTFM_URL + "track.search&track=%s&artist=%s&page=%i&limit=1&api_key=%s&format=json" % (gurl(title), gurl(artist), page, LASTFM_API_KEY)
+		ajsonobj = search(aurl)
+
+		atitle = ajsonobj['results']['trackmatches']['track'][0]['name']
+		aartist = ajsonobj['results']['trackmatches']['track'][0]['artist']
+
+		print()
+		print("  Title: %s" % atitle)
+		print("  Artist: %s" % aartist)
+		print()
+		aopt = input("Is this information correct? (Y/n): ")
+
+		if aopt == "Y":
+			title = atitle
+			artist = aartist
+			select = True;
+
+		page += 1
+
+	return [title, artist]
+
+# getopt for main
+def getlimonopt():
+	global recurse_flag
+	directory = ""
+
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], "d:", ["no-recurse"])
+	except getopt.GetoptError as err:
+		usage()
+
+	# argument handling
+	for o, a in opts:
+		if o == "-d":
+			try:
 				try:
-					# load json
-					sresponse = urlopen(surl)
-					sresponsestring = sresponse.read().decode('utf-8')
-					sjsonobj = json.loads(sresponsestring)
-
-					print(surl)
-					return 1
+					os.listdir(dirformat(a))
+					directory = dirformat(a)
+					dirmode = True
 				except:
-					print("error: error in opening URL. returning to recover menu...")
-					recover(sarray)
-		# manual
-		elif option == "M":
-			print()
+					print("Error: no such directory exists")
+					return 1
+			except:
+				try:
+					try:
+						open(a, mode='rb')
+						file = a
+						dirmode = False
+					except:
+						print("error: no such file exists")
+						return 1
+				except:
+					print("error: nondir, nonfile argument")
+					usage()
+		elif o == "--no-recurse":
+			recurse_flag = False
+			print("recurse off")
 
-			# intermediate vars for retain support
-			ititle = input("Track Title (%s): " % title)
-			if ititle == "":
-				ititle = title
+	if dirmode:
+		files = glob.glob(directory + '**/*.mp3', recursive=recurse_flag)
+		print("Root Directory: %s" % directory)
+		print()
+	else:
+		files = [file]
+		print("Selected File: %s" % file)
+		print()
 
-			album = input("Album: ")
-
-			album_artist = input("Album Artist: ")
-			print()
-
-			return [album, album_artist, ititle]
-
-		else:
-			return False
+	return [files, directory]
 
 # load mp3 file and update available tags
-def mp3set(item, tagdict, full_flag):
+def mp3set(item, tagdict):
 	mp3 = eyed3.load(item)
-	if full_flag:
-		mp3.initTag()
-	for i in tagdict:
-		if i == 'image':
+	mp3.initTag()
+	for tag in tagdict:
+		if tag == 'image':
 			# tag.images has a special setter
 			mp3.tag.images.set(3, tagdict[5], "image/png", u"")
 		else:
-			mp3.tag.i = tagdict[i]
+			setattr(mp3.tag, tag, tagdict[tag])
 
 	mp3.tag.save()
 
 # open image binary from URL
 def imageget(jsonobj2):
-	image = jsonobj2['album']['image'][3]['#text']
+	base = jsonobj2['album']['image']
 	try:
-		return urlopen(image).read()
+		nimage = base[len(base.keys()) - 1]['#text']
 	except:
-		suggest("error in image URL")
-		return False
+		print("ERROR: No image available")
+		return ""
+
+	try:
+		image = urlopen(nimage).read()
+	except:
+		print("ERROR: No image available")
+		return ""
+
+	return image
+
+# album, album artist
+def malbum(title, artist):
+	url = LASTFM_URL + "track.getInfo&track=%s&artist=%s&api_key=%s&format=json" % (gurl(title), gurl(artist), LASTFM_API_KEY)
+	jsonobj = search(url)
+
+	try:
+		album = jsonobj['track']['album']['title']
+		album_artist = jsonobj['track']['album']['artist']
+	except:
+		print("ERROR: The selected track's album could not be found.")
+		opt = menu(["Search track entries", "Manually enter details to resume processing", "Skip this file"])
+		
+		# search
+		if opt == 1:
+			tarray = tracksearch(title, artist)
+			title = tarray[0]
+			artist = tarray[1]
+
+			return malbum(title, artist)
+
+		#manual
+		elif opt == 2:
+			print("manual")
+
+		#skip
+		else:
+			return False
+
+	return [title, album, album_artist]
 
 def main():
-	# getopt arguments
-	try:
-		opts, args = getopt.getopt(sys.argv[1:], "Fd:f:", ["no-recurse"])
-	except getopt.GetoptError as err:
-		usage()
-
-	# argument handling
-	full_flag = False
-	recovery_flag = False
-	recurse_flag = True
-	for o, a in opts:
-		if o == "-F":
-			full_flag = True
-		elif o == "-d":
-			# '/' at end of dir
-			dirmode = True
-			if a.endswith("/"):
-				directory = a
-			else:
-				directory = a + "/"
-		elif o == "-f":
-			dirmode = False
-			file = a
-		elif o == "--no-recurse":
-			recurse_flag = False
-			print("recurse off")
-	try:
-		if dirmode:
-			try:
-				files = glob.glob(directory + '**/*.mp3', recursive=recurse_flag)
-				os.listdir(directory)
-
-				print("Root Directory: %s" % directory)
-				print()
-			except:
-				print("error: no such directory exists")
-				return 1
-		elif dirmode == False:
-			try:
-				try:
-					files = [file]
-					open(files[0], mode='rb')
-
-					print("Selected File: \"%s\"" % file)
-					print()
-				except:
-					print("error: no such file exists")
-					return 1
-			except:
-				# if neither, error
-				print("error: no directory/file specified")
-				usage()
-	except:
-		print("error: missing required arguments")
-		usage()
+	# getopt
+	farray = getlimonopt()
+	files = farray[0]
+	directory = farray[1]
 
 	# rate limiting settings
 	count = 0
-	prevCycle = time.time()
+	prevcycle = time.time()
 
 	# main file loop
 	for item in files:
 		# AcoustID rate limiting
 		if count >= 3:
-			if (time.time() - prevCycle) < 1.05:
+			if (time.time() - prevcycle) < 1.05:
 				time.sleep(1)
 			count = 0
-			prevCycle = time.time()
-
-		# shorten to filename
-		lastslash = item.rfind('/')
-		filename = item[(lastslash + 1):len(item)]
+			prevcycle = time.time()
 
 		# LOADING
-		print("(%s)" % ((filename[:55] + '...') if len(filename) > 55 else filename), end=" ")
+		filename = fngen(item)
+		print("(%s)" % ((filename[:55] + '...') if len(filename) > 55 else filename))
 
 		# create tag dict
 		tagdict = {}
@@ -216,84 +254,37 @@ def main():
 			if recover(["result"]) == False:
 				continue
 
-		# LOADING .
-		loading()
-
 		# set title, artist
 		title = result[2]
-		tagdict['title'] = title
 		artist = result[3]
+
+		# add title, artist to tags
 		tagdict['artist'] = artist
 
-		# URL safe strings
-		urltitle = urllib.parse.quote_plus(title)
-		urlartist = urllib.parse.quote_plus(artist)
-		
-		# URL for album, album artist
-		url = LASTFM_URL + "track.getInfo&track=%s&artist=%s&api_key=%s&format=json" % (urltitle, urlartist, LASTFM_API_KEY)
+		# get album, album artist
+		aarray = malbum(title, artist)
+		if aarray == False:
+			continue
 
-		# load json
-		try:
-			response = urlopen(url)
-			responsestring = response.read().decode('utf-8')
-			jsonobj = json.loads(responsestring)
-		except:
-			loading(1)
-			if recover(["response", "responsestring", "jsonobj"]) == False:
-				continue
+		title = aarray[0]
+		album = aarray[1]
+		album_artist = aarray[2]
 
-		# LOADING ..
-		loading()
-
-		# parse from json
-		try:
-			album = jsonobj['track']['album']['title']
-			album_artist = jsonobj['track']['album']['artist']
-		except:
-			loading(1)
-			albumarray = recover(["album", "album_artist", title])
-			if albumarray == False:
-				continue
-			else:
-				album = albumarray[0]
-				album_artist = albumarray[1]
-				title = albumarray[2]
-
-				# recalculate filename
-				lastslash = item.rfind('/')
-				filename = item[(lastslash + 1):len(item)]
-
-				# RESUME ..
-				print("(%s)" % ((filename[:55] + '...') if len(filename) > 55 else filename), end=" ")
-				loading()
-				loading()
-
-		# set album, album artist
+		# add album, album artist to tags
+		tagdict['title'] = title
 		tagdict['album'] = album
 		tagdict['album_artist'] = album_artist
 
-		# URL safe strings
-		urlalbum = urllib.parse.quote_plus(album)
-		urlalbum_artist = urllib.parse.quote_plus(album_artist)
-
-		# LOADING ...
-		loading()
-
 		# URL for genre, image
-		url2 = LASTFM_URL + "album.getInfo&album=%s&artist=%s&api_key=%s&format=json" % (urlalbum, urlalbum_artist, LASTFM_API_KEY)
+		url2 = LASTFM_URL + "album.getInfo&album=%s&artist=%s&api_key=%s&format=json" % (gurl(album), gurl(album_artist), LASTFM_API_KEY)
 
 		# load json2
 		try:
-			response2 = urlopen(url2)
-			responsestring2 = response2.read().decode('utf-8')
-			jsonobj2 = json.loads(responsestring2)
+			jsonobj2 = search(url2)
 		except:
 			loading(1)
 			if recover(["response2", "responsestring2", "jsonobj2"]) == False:
 				continue
-
-		# LOADING ....
-		loading()
 
 		genreobj = jsonobj2['album']['tags']['tag']
 
@@ -302,6 +293,8 @@ def main():
 			genre = genreobj2[0]['name'].title()
 		except:
 			genre = ""
+
+		tagdict['genre'] = genre
 		
 		# get image data
 		image = imageget(jsonobj2)
@@ -310,17 +303,15 @@ def main():
 			if recover(["image"]) == False:
 				continue
 
-		# LOADING .....
-		loading()
-
-		mp3set(item, tagdict, full_flag)
+		# tag and rename
+		mp3set(item, tagdict)
 		os.rename(item, (directory + artist + ' - ' + title + '.mp3')) # Artist - Title
 
-		# LOADING .....OK!
-		loading(2)
+		# done!
+		print("OK!")
 		
 		count += 1 # rate limit
-	print()
+	print() # space between entries
 
 # exec main
 if __name__ == "__main__":
