@@ -82,11 +82,20 @@ def menu(optarray):
 
 	return choice
 
+# pick and choose track from search list
 def tracksearch(title, artist):
-	trackopt = input("Track title is \"%s\", correct? (y/N): " % title)
+	print()
+	print("<--TRACK SEARCH-->")
 
+	# manual title?
+	trackopt = input("Track title is \"%s\", correct? (y/N): " % title)
 	if trackopt == "N":
 		title = input("Enter new track title: ")
+
+	# manual artist?
+	artistopt = input("Artist is \"%s\", correct? (y/N): " % artist)
+	if artistopt == "N":
+		artist = input("Enter new artist: ")
 
 	page = 0
 	select = False
@@ -97,9 +106,18 @@ def tracksearch(title, artist):
 		atitle = ajsonobj['results']['trackmatches']['track'][0]['name']
 		aartist = ajsonobj['results']['trackmatches']['track'][0]['artist']
 
+		narray = malbum(title, artist, False)
+		aalbum = narray[1]
+		aalbum_artist = narray[2]
+
 		print()
 		print("  Title: %s" % atitle)
 		print("  Artist: %s" % aartist)
+		print()
+		print("  Album: %s" % aalbum)
+		print("  Album Artist: %s" % aalbum_artist)
+		#print("  Genre: %s" % agenre)
+		#print("  Image: %s" % aimg)
 		print()
 		aopt = input("Is this information correct? (Y/n): ")
 
@@ -107,10 +125,40 @@ def tracksearch(title, artist):
 			title = atitle
 			artist = aartist
 			select = True;
+		else:
+			copt = input("Enter manual search (or continue)? (Y/n): ")
+			if copt == "Y":
+				return manual(title, artist)
 
 		page += 1
 
+	print("<---------------->")
+	print()
+
 	return [title, artist]
+
+def manual(title, artist):
+	print()
+	print("<-----MANUAL----->")
+
+	title = input("Track title (%s): " % title)
+	artist = input("Artist (%s): " % artist)
+
+	# album suggestion
+	zarray = malbum(title, artist, False)
+	zalbum = zarray[1]
+
+	album = input("Album (%s): " % zalbum)
+
+	if album == zalbum:
+		album_artist = input("Album Artist (%s): " % zalbum_artist)
+	else:
+		album_artist = input("Album Artist: ")
+
+	print("<---------------->")
+	print()
+
+	return [title, album, album_artist]
 
 # getopt for main
 def getlimonopt():
@@ -140,14 +188,13 @@ def getlimonopt():
 						file = a
 						dirmode = False
 					except:
-						print("error: no such file exists")
+						print("Error: No such file exists")
 						return 1
 				except:
-					print("error: nondir, nonfile argument")
+					print("Error: Non-dir, non-file argument")
 					usage()
 		elif o == "--no-recurse":
 			recurse_flag = False
-			print("recurse off")
 
 	if dirmode:
 		files = glob.glob(directory + '**/*.mp3', recursive=recurse_flag)
@@ -191,32 +238,39 @@ def imageget(jsonobj2):
 	return image
 
 # album, album artist
-def malbum(title, artist):
+def malbum(title, artist, error=True):
 	url = LASTFM_URL + "track.getInfo&track=%s&artist=%s&api_key=%s&format=json" % (gurl(title), gurl(artist), LASTFM_API_KEY)
 	jsonobj = search(url)
+
+	album = ""
+	album_artist = ""
 
 	try:
 		album = jsonobj['track']['album']['title']
 		album_artist = jsonobj['track']['album']['artist']
 	except:
-		print("ERROR: The selected track's album could not be found.")
-		opt = menu(["Search track entries", "Manually enter details to resume processing", "Skip this file"])
-		
-		# search
-		if opt == 1:
-			tarray = tracksearch(title, artist)
-			title = tarray[0]
-			artist = tarray[1]
+		if error:
+			print("ERROR: The selected track's album could not be found.")
+			opt = menu(["Search track entries", "Manually enter details to resume processing", "Skip this file"])
+			
+			# search
+			if opt == 1:
+				tarray = tracksearch(title, artist)
+				title = tarray[0]
+				artist = tarray[1]
 
-			return malbum(title, artist)
+				return malbum(title, artist)
 
-		#manual
-		elif opt == 2:
-			print("manual")
+			#manual
+			elif opt == 2:
+				varray = manual(track, artist)
+				title = varray[0]
+				album = varray[1]
+				album_artist = varray[2]
 
-		#skip
-		else:
-			return False
+			#skip
+			else:
+				return False
 
 	return [title, album, album_artist]
 
