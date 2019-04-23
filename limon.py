@@ -14,7 +14,6 @@ import time
 import glob
 import json
 import os
-import getopt
 import requests
 import sys
 
@@ -24,36 +23,29 @@ import acoustid
 import eyed3
 
 # API settings
-LASTFM_URL = 'http://ws.audioscrobbler.com/2.0/?method='
+LASTFM_URL = "http://ws.audioscrobbler.com/2.0/?method="
 LASTFM_API_KEY = "bf58f74243bf1ebedd90642338a7023f"
-AID_API_KEY = 'XN07NN3TxX'
-
-# global getopt settings
-recurse_flag = True
-dirmode = True
+AID_API_KEY = "XN07NN3TxX"
 
 # print limon usage
 def usage():
-	print("Usage: limon.py -d <directory/file>")
-	print()
+	print("Usage: limon.py <directory/file>")
 	sys.exit(2)
 
+# make sure all dirs have no slash
 def dirformat(directory):
-	if directory.endswith('/') == False:
-		directory = directory + '/'
+	if directory.endswith('/'):
+		directory = directory - '/'
 
 	return directory
+
+def loading():
+	sys.stdout.write('.')
+	sys.stdout.flush()
 
 # URL safe strings
 def gurl(string):
 	return urllib.parse.quote_plus(string)
-
-# generate filename
-def fngen(item):
-	lastslash = item.rfind('/')
-	filename = item[(lastslash + 1):len(item)]
-
-	return filename
 
 def search(url):
 	response = urlopen(url)
@@ -160,53 +152,6 @@ def manual(title, artist):
 
 	return [title, album, album_artist]
 
-# getopt for main
-def getlimonopt():
-	global recurse_flag
-	directory = ""
-
-	try:
-		opts, args = getopt.getopt(sys.argv[1:], "d:", ["no-recurse"])
-	except getopt.GetoptError as err:
-		usage()
-
-	# argument handling
-	for o, a in opts:
-		if o == "-d":
-			try:
-				try:
-					os.listdir(dirformat(a))
-					directory = dirformat(a)
-					dirmode = True
-				except:
-					print("Error: no such directory exists")
-					return 1
-			except:
-				try:
-					try:
-						open(a, mode='rb')
-						file = a
-						dirmode = False
-					except:
-						print("Error: No such file exists")
-						return 1
-				except:
-					print("Error: Non-dir, non-file argument")
-					usage()
-		elif o == "--no-recurse":
-			recurse_flag = False
-
-	if dirmode:
-		files = glob.glob(directory + '**/*.mp3', recursive=recurse_flag)
-		print("Root Directory: %s" % directory)
-		print()
-	else:
-		files = [file]
-		print("Selected File: %s" % file)
-		print()
-
-	return [files, directory]
-
 # load mp3 file and update available tags
 def mp3set(item, tagdict):
 	mp3 = eyed3.load(item)
@@ -226,13 +171,15 @@ def imageget(jsonobj2):
 	try:
 		nimage = base[len(base.keys()) - 1]['#text']
 	except:
-		print("ERROR: No image available")
+		sys.stdout.write('NoIMG')
+		sys.stdout.flush()
 		return ""
 
 	try:
 		image = urlopen(nimage).read()
 	except:
-		print("ERROR: No image available")
+		sys.stdout.write('NoIMG')
+		sys.stdout.flush()
 		return ""
 
 	return image
@@ -250,7 +197,7 @@ def malbum(title, artist, error=True):
 		album_artist = jsonobj['track']['album']['artist']
 	except:
 		if error:
-			print("ERROR: The selected track's album could not be found.")
+			print("\nERROR: The selected track's album could not be found.")
 			opt = menu(["Search track entries", "Manually enter details to resume processing", "Skip this file"])
 			
 			# search
@@ -275,10 +222,20 @@ def malbum(title, artist, error=True):
 	return [title, album, album_artist]
 
 def main():
-	# getopt
-	farray = getlimonopt()
-	files = farray[0]
-	directory = farray[1]
+	# directory/file arg
+	try:
+		inp = sys.argv[1]
+		files = []
+	except:
+		sys.stdout.write("ERROR: No input file/directory specified.")
+		usage()
+
+	# directory or file?
+	if os.path.isfile(inp):
+		files = [inp]
+	else:
+		inp = dirformat(inp)
+		files = glob.iglob("%s/**/*.mp3" % inp, recursive=True)
 
 	# rate limiting settings
 	count = 0
@@ -294,8 +251,7 @@ def main():
 			prevcycle = time.time()
 
 		# LOADING
-		filename = fngen(item)
-		print("(%s)" % ((filename[:55] + '...') if len(filename) > 55 else filename))
+		print("(%s) " % ((item[:55] + '...') if len(item) > 55 else item), end='')
 
 		# create tag dict
 		tagdict = {}
@@ -303,10 +259,12 @@ def main():
 		# get title, artist
 		try:
 			result = next(acoustid.match(AID_API_KEY, item))
-		except:
-			loading(1)
+		except: 
+			loading()
 			if recover(["result"]) == False:
 				continue
+
+		loading()
 
 		# set title, artist
 		title = result[2]
@@ -329,6 +287,8 @@ def main():
 		tagdict['album'] = album
 		tagdict['album_artist'] = album_artist
 
+		loading()
+
 		# URL for genre, image
 		url2 = LASTFM_URL + "album.getInfo&album=%s&artist=%s&api_key=%s&format=json" % (gurl(album), gurl(album_artist), LASTFM_API_KEY)
 
@@ -336,9 +296,9 @@ def main():
 		try:
 			jsonobj2 = search(url2)
 		except:
-			loading(1)
-			if recover(["response2", "responsestring2", "jsonobj2"]) == False:
-				continue
+			loading()
+			#if recover(["response2", "responsestring2", "jsonobj2"]) == False:
+				#continue
 
 		genreobj = jsonobj2['album']['tags']['tag']
 
@@ -353,19 +313,30 @@ def main():
 		# get image data
 		image = imageget(jsonobj2)
 		if image == False:
-			loading(1)
-			if recover(["image"]) == False:
-				continue
+			loading()
+			#if recover(["image"]) == False:
+				#continue
 
-		# tag and rename
+		loading()
+
+		# apply tags
 		mp3set(item, tagdict)
-		os.rename(item, (directory + artist + ' - ' + title + '.mp3')) # Artist - Title
 
-		# done!
-		print("OK!")
+		# get correct slash character ( Windows >:( )
+		if os.name == "nt":
+			slash = "\\"
+		else:
+			slash = "/"
+
+		# rename
+		directory = item.rsplit(slash)[0] + slash
+		try:
+			os.rename(item, (directory + artist + ' - ' + title + '.mp3')) # Artist - Title
+		except:
+			print("\nWARNING: Restart with root permissions to rename.")
 		
 		count += 1 # rate limit
-	print() # space between entries
+	print()
 
 # exec main
 if __name__ == "__main__":

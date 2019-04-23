@@ -1,3 +1,6 @@
 pyacoustid
 eyed3
 pillow
+python-magic
+pychromaprint
+ffmpeg
