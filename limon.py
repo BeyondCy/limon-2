@@ -22,10 +22,19 @@ from PIL import Image
 import acoustid
 import eyed3
 
+# limon version
+version = "0.1"
+
 # API settings
 LASTFM_URL = "http://ws.audioscrobbler.com/2.0/?method="
 LASTFM_API_KEY = "bf58f74243bf1ebedd90642338a7023f"
 AID_API_KEY = "XN07NN3TxX"
+
+# get correct slash character ( Windows >:( )
+if os.name == "nt":
+	slash = "\\"
+else:
+	slash = "/"
 
 # print limon usage
 def usage():
@@ -34,8 +43,8 @@ def usage():
 
 # make sure all dirs have no slash
 def dirformat(directory):
-	if directory.endswith('/'):
-		directory = directory - '/'
+	if directory.endswith(slash):
+		directory = directory - slash
 
 	return directory
 
@@ -44,113 +53,15 @@ def loading():
 	sys.stdout.flush()
 
 # URL safe strings
-def gurl(string):
+def safeurl(string):
 	return urllib.parse.quote_plus(string)
 
-def search(url):
+def search2json(url):
 	response = urlopen(url)
 	responsestring = response.read().decode('utf-8')
 	jsonobj = json.loads(responsestring)
 
 	return jsonobj
-
-# fancy menu for errors
-def menu(optarray):
-	for opt in optarray:
-		print("[%i]: %s" % ((optarray.index(opt) + 1), opt))
-
-	print()
-	try:
-		choice = int(input("[?]: "))
-	except:
-		print("ERROR: Choice must be of type 'int'")
-		print()
-		return menu(optarray)
-
-	if (choice > (optarray.index(opt)) + 1) or (choice < 1):
-		print("ERROR: Choice out of range")
-		print()
-		return menu(optarray)
-
-	return choice
-
-# pick and choose track from search list
-def tracksearch(title, artist):
-	print()
-	print("<--TRACK SEARCH-->")
-
-	# manual title?
-	trackopt = input("Track title is \"%s\", correct? (y/N): " % title)
-	if trackopt == "N":
-		title = input("Enter new track title: ")
-
-	# manual artist?
-	artistopt = input("Artist is \"%s\", correct? (y/N): " % artist)
-	if artistopt == "N":
-		artist = input("Enter new artist: ")
-
-	page = 0
-	select = False
-	while select == False:
-		aurl = LASTFM_URL + "track.search&track=%s&artist=%s&page=%i&limit=1&api_key=%s&format=json" % (gurl(title), gurl(artist), page, LASTFM_API_KEY)
-		ajsonobj = search(aurl)
-
-		atitle = ajsonobj['results']['trackmatches']['track'][0]['name']
-		aartist = ajsonobj['results']['trackmatches']['track'][0]['artist']
-
-		narray = malbum(title, artist, False)
-		aalbum = narray[1]
-		aalbum_artist = narray[2]
-
-		print()
-		print("  Title: %s" % atitle)
-		print("  Artist: %s" % aartist)
-		print()
-		print("  Album: %s" % aalbum)
-		print("  Album Artist: %s" % aalbum_artist)
-		#print("  Genre: %s" % agenre)
-		#print("  Image: %s" % aimg)
-		print()
-		aopt = input("Is this information correct? (Y/n): ")
-
-		if aopt == "Y":
-			title = atitle
-			artist = aartist
-			select = True;
-		else:
-			copt = input("Enter manual search (or continue)? (Y/n): ")
-			if copt == "Y":
-				return manual(title, artist)
-
-		page += 1
-
-	print("<---------------->")
-	print()
-
-	return [title, artist]
-
-def manual(title, artist):
-	print()
-	print("<-----MANUAL----->")
-
-	title = input("Track title (%s): " % title)
-	artist = input("Artist (%s): " % artist)
-
-	# album suggestion
-	zarray = malbum(title, artist, False)
-	zalbum = zarray[1]
-
-	album = input("Album (%s): " % zalbum)
-
-	if album == zalbum:
-		album_artist = input("Album Artist (%s): " % zalbum_artist)
-	else:
-		album_artist = input("Album Artist: ")
-
-	print("<---------------->")
-	print()
-
-	return [title, album, album_artist]
 
 # load mp3 file and update available tags
 def mp3set(item, tagdict):
@@ -166,17 +77,16 @@ def mp3set(item, tagdict):
 	mp3.tag.save()
 
 # open image binary from URL
-def imageget(jsonobj2):
+def getimage(jsonobj2):
 	base = jsonobj2['album']['image']
 	try:
-		nimage = base[len(base.keys()) - 1]['#text']
-	except:
-		sys.stdout.write('NoIMG')
-		sys.stdout.flush()
-		return ""
-
-	try:
-		image = urlopen(nimage).read()
+		nimage = base[len(base) - 1]['#text']
+		try:
+			image = urlopen(nimage).read()
+		except:
+			sys.stdout.write('NoIMG')
+			sys.stdout.flush()
+			return ""
 	except:
 		sys.stdout.write('NoIMG')
 		sys.stdout.flush()
@@ -185,9 +95,9 @@ def imageget(jsonobj2):
 	return image
 
 # album, album artist
-def malbum(title, artist, error=True):
-	url = LASTFM_URL + "track.getInfo&track=%s&artist=%s&api_key=%s&format=json" % (gurl(title), gurl(artist), LASTFM_API_KEY)
-	jsonobj = search(url)
+def getalbum(title, artist, error=True):
+	url = LASTFM_URL + "track.getInfo&track=%s&artist=%s&api_key=%s&format=json" % (safeurl(title), safeurl(artist), LASTFM_API_KEY)
+	jsonobj = search2json(url)
 
 	album = ""
 	album_artist = ""
@@ -206,7 +116,7 @@ def malbum(title, artist, error=True):
 				title = tarray[0]
 				artist = tarray[1]
 
-				return malbum(title, artist)
+				return getalbum(title, artist)
 
 			#manual
 			elif opt == 2:
@@ -227,21 +137,25 @@ def main():
 		inp = sys.argv[1]
 		files = []
 	except:
-		sys.stdout.write("ERROR: No input file/directory specified.")
+		print("ERROR: No input file/directory specified.")
 		usage()
 
 	# directory or file?
 	if os.path.isfile(inp):
 		files = [inp]
-	else:
+	elif os.path.isdir(inp):
 		inp = dirformat(inp)
 		files = glob.iglob("%s/**/*.mp3" % inp, recursive=True)
+	else: # not a file or dir, must not exist
+		print("ERROR: File does not exist.")
+		sys.exit(1)
 
 	# rate limiting settings
 	count = 0
 	prevcycle = time.time()
 
 	# main file loop
+	print("<<< Limon v%s >>>\n" % version)
 	for item in files:
 		# AcoustID rate limiting
 		if count >= 3:
@@ -253,7 +167,7 @@ def main():
 		# LOADING
 		print("(%s) " % ((item[:55] + '...') if len(item) > 55 else item), end='')
 
-		# create tag dict
+		# list of tags to be applied
 		tagdict = {}
 
 		# get title, artist
@@ -274,7 +188,7 @@ def main():
 		tagdict['artist'] = artist
 
 		# get album, album artist
-		aarray = malbum(title, artist)
+		aarray = getalbum(title, artist)
 		if aarray == False:
 			continue
 
@@ -290,11 +204,11 @@ def main():
 		loading()
 
 		# URL for genre, image
-		url2 = LASTFM_URL + "album.getInfo&album=%s&artist=%s&api_key=%s&format=json" % (gurl(album), gurl(album_artist), LASTFM_API_KEY)
+		url2 = LASTFM_URL + "album.getInfo&album=%s&artist=%s&api_key=%s&format=json" % (safeurl(album), safeurl(album_artist), LASTFM_API_KEY)
 
 		# load json2
 		try:
-			jsonobj2 = search(url2)
+			jsonobj2 = search2json(url2)
 		except:
 			loading()
 			#if recover(["response2", "responsestring2", "jsonobj2"]) == False:
@@ -311,7 +225,7 @@ def main():
 		tagdict['genre'] = genre
 		
 		# get image data
-		image = imageget(jsonobj2)
+		image = getimage(jsonobj2)
 		if image == False:
 			loading()
 			#if recover(["image"]) == False:
@@ -322,12 +236,6 @@ def main():
 		# apply tags
 		mp3set(item, tagdict)
 
-		# get correct slash character ( Windows >:( )
-		if os.name == "nt":
-			slash = "\\"
-		else:
-			slash = "/"
-
 		# rename
 		directory = item.rsplit(slash)[0] + slash
 		try:
@@ -335,9 +243,12 @@ def main():
 		except:
 			print("\nWARNING: Restart with root permissions to rename.")
 		
+		print("OK!")
 		count += 1 # rate limit
 	print()
 
 # exec main
 if __name__ == "__main__":
 	main()
+
+input("Press ENTER to continue...")
