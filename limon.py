@@ -30,11 +30,53 @@ LASTFM_URL = "http://ws.audioscrobbler.com/2.0/?method="
 LASTFM_API_KEY = "bf58f74243bf1ebedd90642338a7023f"
 AID_API_KEY = "XN07NN3TxX"
 
-# get correct slash character ( Windows >:( )
+# get correct slash character - Windows >:(
 if os.name == "nt":
 	slash = "\\"
 else:
 	slash = "/"
+
+# general mp3 attrib class
+class MP3:
+	def __init__(self):
+		self.title = ""
+		self.artist = ""
+		self.album = ""
+		self.album_artist
+		self.genre = ""
+		self.trackid = ""
+		self.image = ""
+
+# (abc.mp3) ... class
+class Listing(MP3):
+	def __init__(self, item):
+		self.title = "(%s)" % item
+		self.loading = 0
+		self.errqueue = []
+
+	def print(self):
+		print("%s " % self.title, end="")
+		for i in range(0, self.loading):
+			sys.stdout.write('.')
+		sys.stdout.flush()
+
+	def print_err(self):
+		for err in self.errqueue:
+			sys.stdout.write(" >> %s" % err)
+		sys.stdout.flush()
+		print()
+
+	def add_err(self, err):
+		self.errqueue.append(err)
+
+	def load(self):
+		self.loading += 1
+		sys.stdout.write('.')
+		sys.stdout.flush()
+
+	def quit(self):
+		print('X')
+		self.print_err()
 
 # print limon usage
 def usage():
@@ -48,13 +90,9 @@ def dirformat(directory):
 
 	return directory
 
-def loading():
-	sys.stdout.write('.')
-	sys.stdout.flush()
-
 # URL safe strings
 def safeurl(string):
-	return urllib.parse.quote_plus(string)
+	return urllib.parse.quote_plus(string.encode('utf-8'))
 
 def search2json(url):
 	response = urlopen(url)
@@ -63,7 +101,16 @@ def search2json(url):
 
 	return jsonobj
 
-# load mp3 file and update available tags
+# check for tags before applying them
+def mp3(item, tagdict):
+	mp3 = eyed3.load(item)
+	mp3.initTag()
+
+	# check stuff to-do
+
+	mp3set(item, tagdict)
+
+# load mp3 file and apply available tags
 def mp3set(item, tagdict):
 	mp3 = eyed3.load(item)
 	mp3.initTag()
@@ -95,7 +142,7 @@ def getimage(jsonobj2):
 	return image
 
 # album, album artist
-def getalbum(title, artist, error=True):
+def getalbum(title, artist):
 	url = LASTFM_URL + "track.getInfo&track=%s&artist=%s&api_key=%s&format=json" % (safeurl(title), safeurl(artist), LASTFM_API_KEY)
 	jsonobj = search2json(url)
 
@@ -106,28 +153,7 @@ def getalbum(title, artist, error=True):
 		album = jsonobj['track']['album']['title']
 		album_artist = jsonobj['track']['album']['artist']
 	except:
-		if error:
-			print("\nERROR: The selected track's album could not be found.")
-			opt = menu(["Search track entries", "Manually enter details to resume processing", "Skip this file"])
-			
-			# search
-			if opt == 1:
-				tarray = tracksearch(title, artist)
-				title = tarray[0]
-				artist = tarray[1]
-
-				return getalbum(title, artist)
-
-			#manual
-			elif opt == 2:
-				varray = manual(track, artist)
-				title = varray[0]
-				album = varray[1]
-				album_artist = varray[2]
-
-			#skip
-			else:
-				return False
+		return False
 
 	return [title, album, album_artist]
 
@@ -165,7 +191,9 @@ def main():
 			prevcycle = time.time()
 
 		# LOADING
-		print("(%s) " % ((item[:55] + '...') if len(item) > 55 else item), end='')
+		listing = Listing(item)
+		listing.print()
+		listing.load()
 
 		# list of tags to be applied
 		tagdict = {}
@@ -174,76 +202,84 @@ def main():
 		try:
 			result = next(acoustid.match(AID_API_KEY, item))
 		except: 
-			loading()
-			if recover(["result"]) == False:
-				continue
-
-		loading()
-
-		# set title, artist
-		title = result[2]
-		artist = result[3]
-
-		# add title, artist to tags
-		tagdict['artist'] = artist
-
-		# get album, album artist
-		aarray = getalbum(title, artist)
-		if aarray == False:
+			listing.add_err("ERROR: File not found in database.")
+			listing.quit()
 			continue
 
-		title = aarray[0]
-		album = aarray[1]
-		album_artist = aarray[2]
+		# set title, artist
+		firsttitle = result[2] # temporary title
+		listing.artist = result[3]
 
-		# add album, album artist to tags
-		tagdict['title'] = title
-		tagdict['album'] = album
-		tagdict['album_artist'] = album_artist
+		if firsttitle == None or listing.artist == None:
+			listing.add_err("ERROR: Database returned unexpected result.")
+			listing.quit()
+			continue
 
-		loading()
+		# add artist to tags
+		# tagdict['title'] = title (title is verified from album)
+		tagdict['artist'] = listing.artist
+
+		# get album, album artist
+		aarray = getalbum(firsttitle, listing.artist)
+		if aarray == False:
+			listing.add_err("ERROR: Album not found.")
+			listing.quit()
+			continue
+
+		listing.title = aarray[0]
+		listing.album = aarray[1]
+		listing.album_artist = aarray[2]
+
+		# add title, album, album artist to tags
+		tagdict['title'] = listing.title
+		tagdict['album'] = listing.album
+		tagdict['album_artist'] = listing.album_artist
+
+		listing.load()
 
 		# URL for genre, image
-		url2 = LASTFM_URL + "album.getInfo&album=%s&artist=%s&api_key=%s&format=json" % (safeurl(album), safeurl(album_artist), LASTFM_API_KEY)
+		url2 = LASTFM_URL + "album.getInfo&album=%s&artist=%s&api_key=%s&format=json" % (safeurl(listing.album), safeurl(listing.album_artist), LASTFM_API_KEY)
 
 		# load json2
 		try:
 			jsonobj2 = search2json(url2)
 		except:
-			loading()
-			#if recover(["response2", "responsestring2", "jsonobj2"]) == False:
-				#continue
+			listing.add_err("ERROR: Can't retrieve album information.")
+			listing.quit()
+			continue
 
 		genreobj = jsonobj2['album']['tags']['tag']
 
 		# parse from json2
 		try:
-			genre = genreobj2[0]['name'].title()
+			listing.genre = genreobj2[0]['name'].title()
+			tagdict['genre'] = listing.genre
 		except:
-			genre = ""
-
-		tagdict['genre'] = genre
+			listing.add_err("WARNING: Genre not found.")
 		
 		# get image data
-		image = getimage(jsonobj2)
-		if image == False:
-			loading()
-			#if recover(["image"]) == False:
-				#continue
+		listing.image = getimage(jsonobj2)
+		if listing.image == False:
+			listing.add_err("WARNING: Album art not found.")
 
-		loading()
+		listing.load()
 
-		# apply tags
-		mp3set(item, tagdict)
+		# check for and apply tags
+		mp3(item, tagdict)
 
 		# rename
 		directory = item.rsplit(slash)[0] + slash
 		try:
-			os.rename(item, (directory + artist + ' - ' + title + '.mp3')) # Artist - Title
+			os.rename(item, (directory + listing.artist + ' - ' + listing.title + '.mp3')) # Artist - Title
 		except:
-			print("\nWARNING: Restart with root permissions to rename.")
+			listing.add_err("WARNING: Restart with root permissions to rename.")
 		
+		# DONE
 		print("OK!")
+
+		listing.print_err()
+		del listing # remove from memory
+
 		count += 1 # rate limit
 	print()
 
